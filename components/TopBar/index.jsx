@@ -86,6 +86,8 @@ function TopBar() {
       title = `${user.first_name} ${user.last_name}`;
     } else if (location.pathname.startsWith('/photos/')) {
       title = `Photos of ${user.first_name} ${user.last_name}`;
+    } else if (location.pathname.startsWith('/comments')) {
+      title = `Comments of ${user.first_name} ${user.last_name}`;
     }
   }
 

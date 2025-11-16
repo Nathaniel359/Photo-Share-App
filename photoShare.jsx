@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import ReactDOM from 'react-dom/client';
