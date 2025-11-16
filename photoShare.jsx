@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ReactDOM from 'react-dom/client';
 import { Grid, Paper, ThemeProvider, CssBaseline } from '@mui/material';
 import {
-  BrowserRouter, Route, Routes, useParams,
+  BrowserRouter, Route, Routes, Navigate,
 } from 'react-router-dom';
 
 import './styles/main.css';
@@ -14,8 +14,23 @@ import UserDetail from './components/UserDetail';
 import UserList from './components/UserList';
 import UserPhotos from './components/UserPhotos';
 import UserComments from './components/UserComments';
+import LoginRegister from './components/LoginRegister';
+import useAuthStore from './store/useAuthStore';
+
+// Protected Route Component
+function ProtectedRoute({ children }) {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+}
 
 function PhotoShare() {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+
   return (
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
@@ -27,21 +42,67 @@ function PhotoShare() {
             </Grid>
 
             <div className="main-topbar-buffer" />
-            
-            <Grid item sm={3}>
-              <Paper className="main-grid-item">
-                <UserList/>
-              </Paper>
-            
-            </Grid>
-            <Grid item sm={9}>
+
+            {isAuthenticated && (
+              <Grid item sm={3}>
+                <Paper className="main-grid-item">
+                  <UserList/>
+                </Paper>
+              </Grid>
+            )}
+
+            <Grid item sm={isAuthenticated ? 9 : 12}>
               <Paper className="main-grid-item">
                 <Routes>
-                  <Route path="/users/:userId" element={<UserDetail />} />
-                  <Route path="/photos/:userId" element={<UserPhotos />} />
-                  <Route path="/photos/:userId/:photoIndex" element={<UserPhotos />} />
-                  <Route path="/users" element={<UserList />} />
-                  <Route path="/comments/:userId" element={<UserComments />} />
+                  <Route path="/login" element={<LoginRegister />} />
+                  <Route
+                    path="/users/:userId"
+                    element={
+                      <ProtectedRoute>
+                        <UserDetail />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/photos/:userId"
+                    element={
+                      <ProtectedRoute>
+                        <UserPhotos />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/photos/:userId/:photoIndex"
+                    element={
+                      <ProtectedRoute>
+                        <UserPhotos />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/users"
+                    element={
+                      <ProtectedRoute>
+                        <UserList />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/comments/:userId"
+                    element={
+                      <ProtectedRoute>
+                        <UserComments />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/"
+                    element={
+                      isAuthenticated ?
+                        <Navigate to="/users" replace /> :
+                        <Navigate to="/login" replace />
+                    }
+                  />
                 </Routes>
               </Paper>
             </Grid>

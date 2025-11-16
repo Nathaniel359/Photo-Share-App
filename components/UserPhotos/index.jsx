@@ -1,8 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Typography, Grid, Card, CardMedia, CardContent, CardHeader, Divider, Button } from "@mui/material";
-import { useQuery } from '@tanstack/react-query';
-import { fetchUserName, fetchPhotosOfUser } from "../../api";
+import { Typography, Grid, Card, CardMedia, CardContent, CardHeader, Divider, Button, TextField, Box } from "@mui/material";
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchUserName, fetchPhotosOfUser, addComment } from "../../api";
 import useAdvancedStore from "../../store/useAdvancedStore"
 
 import "./styles.css";
@@ -13,6 +13,11 @@ function UserPhotos() {
   const navigate = useNavigate();
   const advancedMode = useAdvancedStore((s) => s.advancedMode);
   const setAdvancedMode = useAdvancedStore((s) => s.setAdvancedMode);
+  const queryClient = useQueryClient();
+
+  // State for adding comments
+  const [newComment, setNewComment] = useState({});
+  const [submitting, setSubmitting] = useState({});
 
   useEffect(() => {
     if (photoIndex && !advancedMode) {
@@ -44,6 +49,31 @@ function UserPhotos() {
   if (photosIsError) return <p>Error loading photos</p>;
 
   if (!photos) return null;
+
+  // Handle adding a comment
+  const handleAddComment = async (photoId) => {
+    const commentText = newComment[photoId];
+    if (!commentText || !commentText.trim()) {
+      return;
+    }
+
+    setSubmitting({ ...submitting, [photoId]: true });
+
+    try {
+      await addComment(photoId, commentText);
+
+      // Clear the input
+      setNewComment({ ...newComment, [photoId]: '' });
+
+      // Refetch photos to show the new comment
+      await queryClient.invalidateQueries(['photos', userId]);
+    } catch (err) {
+      console.error('Error adding comment:', err);
+      alert('Failed to add comment. Please try again.');
+    } finally {
+      setSubmitting({ ...submitting, [photoId]: false });
+    }
+  };
 
   // regular view
   if (!advancedMode) {
@@ -82,6 +112,28 @@ function UserPhotos() {
                       <Divider />
                     </div>
                   ))}
+
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="body1" sx={{ mb: 1 }}>Add a comment:</Typography>
+                    <TextField
+                      fullWidth
+                      multiline
+                      rows={2}
+                      placeholder="Write your comment here..."
+                      value={newComment[photo._id] || ''}
+                      onChange={(e) => setNewComment({ ...newComment, [photo._id]: e.target.value })}
+                      disabled={submitting[photo._id]}
+                    />
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={() => handleAddComment(photo._id)}
+                      disabled={submitting[photo._id] || !newComment[photo._id]?.trim()}
+                      sx={{ mt: 1 }}
+                    >
+                      {submitting[photo._id] ? 'Adding...' : 'Add Comment'}
+                    </Button>
+                  </Box>
                 </CardContent>
               </Card>
             </Grid>
@@ -134,6 +186,28 @@ function UserPhotos() {
               <Divider />
             </div>
           ))}
+
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body1" sx={{ mb: 1 }}>Add a comment:</Typography>
+            <TextField
+              fullWidth
+              multiline
+              rows={2}
+              placeholder="Write your comment here..."
+              value={newComment[photo._id] || ''}
+              onChange={(e) => setNewComment({ ...newComment, [photo._id]: e.target.value })}
+              disabled={submitting[photo._id]}
+            />
+            <Button
+              variant="contained"
+              color="primary"
+              onClick={() => handleAddComment(photo._id)}
+              disabled={submitting[photo._id] || !newComment[photo._id]?.trim()}
+              sx={{ mt: 1 }}
+            >
+              {submitting[photo._id] ? 'Adding...' : 'Add Comment'}
+            </Button>
+          </Box>
         </CardContent>
       </Card>
 

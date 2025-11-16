@@ -9,9 +9,12 @@ import mongoose from "mongoose";
 // eslint-disable-next-line import/no-extraneous-dependencies
 import bluebird from "bluebird";
 import express from "express";
+import session from "express-session";
+import multer from "multer";
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import async from "async";
+import fs from "fs";
 
 // ToDO - Your submission should work without this line. Comment out or delete this line for tests and before submission!
 // import models from "./modelData/photoApp.js";
@@ -27,15 +30,41 @@ const app = express();
 
 // Enable CORS for all routes
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Origin', 'http://localhost:3000');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
   if (req.method === 'OPTIONS') {
     res.sendStatus(200);
   } else {
     next();
   }
 });
+
+// Parse JSON request bodies
+app.use(express.json());
+
+// Session configuration
+app.use(
+  session({
+    secret: "secretKey",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+  })
+);
+
+// Authentication middleware
+const requireAuth = (req, res, next) => {
+  if (!req.session.user) {
+    return res.status(401).send("Unauthorized");
+  }
+  next();
+};
 
 mongoose.Promise = bluebird;
 mongoose.set("strictQuery", false);
@@ -46,6 +75,21 @@ mongoose.connect("mongodb://127.0.0.1/project3", {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, join(__dirname, 'images'));
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const ext = file.originalname.split('.').pop();
+    cb(null, 'U' + uniqueSuffix + '.' + ext);
+  }
+});
+
+const upload = multer({ storage: storage });
 
 // We have the express static module
 // (http://expressjs.com/en/starter/static-files.html) do all the work for us.
@@ -97,7 +141,7 @@ app.get('/test/counts', async (request, response) => {
 /**
  * URL /user/list - Returns all the User objects.
  */
-app.get('/user/list', async (request, response) => {
+app.get('/user/list', requireAuth, async (request, response) => {
   try {
     const users = await User.find({}, '_id first_name last_name');
 
@@ -111,7 +155,7 @@ app.get('/user/list', async (request, response) => {
 /**
  * URL /user/list/counts - Returns photo and comment counts for each user
  */
-app.get('/user/list/counts', async (request, response) => {
+app.get('/user/list/counts', requireAuth, async (request, response) => {
   try {
     const users = await User.find({}, '_id first_name last_name');
     const photos = await Photo.find({}, 'user_id comments.user_id');
@@ -144,7 +188,7 @@ app.get('/user/list/counts', async (request, response) => {
 /**
  * URL /user/:id - Returns the information for User (id).
  */
-app.get('/user/:id', async (request, response) => {
+app.get('/user/:id', requireAuth, async (request, response) => {
   const { id } = request.params;
 
   // Check if id is valid
@@ -169,7 +213,7 @@ app.get('/user/:id', async (request, response) => {
 /**
  * URL /photosOfUser/:id - Returns the Photos for User (id).
  */
-app.get('/photosOfUser/:id', async (request, response) => {
+app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
   const { id } = request.params;
 
   // Check if id is valid
@@ -212,7 +256,7 @@ app.get('/photosOfUser/:id', async (request, response) => {
   }
 });
 
-app.get("/comments/:userId", async (request, response) => {
+app.get("/comments/:userId", requireAuth, async (request, response) => {
   const { userId } = request.params;
 
   try {
@@ -243,6 +287,207 @@ app.get("/comments/:userId", async (request, response) => {
   } catch (err) {
     console.error("Error fetching user comments:", err);
     response.status(500).json({ message: "Server error" });
+  }
+});
+
+/**
+ * POST /admin/login - Login a user
+ */
+app.post("/admin/login", async (request, response) => {
+  const { login_name, password } = request.body;
+
+  if (!login_name) {
+    return response.status(400).send("Login name is required");
+  }
+
+  if (!password) {
+    return response.status(400).send("Password is required");
+  }
+
+  try {
+    const user = await User.findOne({ login_name });
+
+    if (!user) {
+      return response.status(400).send("User not found");
+    }
+
+    // Check password
+    if (user.password !== password) {
+      return response.status(400).send("Incorrect password");
+    }
+
+    // Store user info in session
+    request.session.user = {
+      _id: user._id,
+      first_name: user.first_name,
+      last_name: user.last_name
+    };
+
+    return response.status(200).json({
+      _id: user._id,
+      first_name: user.first_name,
+      last_name: user.last_name
+    });
+  } catch (err) {
+    console.error("Error during login:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
+/**
+ * POST /admin/logout - Logout the current user
+ */
+app.post("/admin/logout", (request, response) => {
+  if (!request.session.user) {
+    return response.status(400).send("No user is currently logged in");
+  }
+
+  request.session.destroy((err) => {
+    if (err) {
+      console.error("Error destroying session:", err);
+      return response.status(500).send("Server error");
+    }
+    return response.status(200).send("Logout successful");
+  });
+});
+
+/**
+ * POST /user - Register a new user
+ */
+app.post("/user", async (request, response) => {
+  const { login_name, password, first_name, last_name, location, description, occupation } = request.body;
+
+  // Validate required fields
+  if (!login_name || !login_name.trim()) {
+    return response.status(400).send("Login name is required");
+  }
+
+  if (!password || !password.trim()) {
+    return response.status(400).send("Password is required");
+  }
+
+  if (!first_name || !first_name.trim()) {
+    return response.status(400).send("First name is required");
+  }
+
+  if (!last_name || !last_name.trim()) {
+    return response.status(400).send("Last name is required");
+  }
+
+  try {
+    // Check if login_name already exists
+    const existingUser = await User.findOne({ login_name: login_name.trim() });
+    if (existingUser) {
+      return response.status(400).send("Login name already exists");
+    }
+
+    // Create new user
+    const newUser = await User.create({
+      login_name: login_name.trim(),
+      password: password,
+      first_name: first_name.trim(),
+      last_name: last_name.trim(),
+      location: location || "",
+      description: description || "",
+      occupation: occupation || ""
+    });
+
+    return response.status(200).json({
+      login_name: newUser.login_name,
+      first_name: newUser.first_name,
+      last_name: newUser.last_name,
+      _id: newUser._id
+    });
+  } catch (err) {
+    console.error("Error during registration:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
+/**
+ * POST /commentsOfPhoto/:photo_id - Add a comment to a photo
+ */
+app.post("/commentsOfPhoto/:photo_id", requireAuth, async (request, response) => {
+  const { photo_id } = request.params;
+  const { comment } = request.body;
+
+  // Validate photo_id
+  if (!mongoose.Types.ObjectId.isValid(photo_id)) {
+    return response.status(400).send("Invalid photo ID");
+  }
+
+  // Validate comment is not empty
+  if (!comment || !comment.trim()) {
+    return response.status(400).send("Comment cannot be empty");
+  }
+
+  try {
+    // Find the photo
+    const photo = await Photo.findById(photo_id);
+    if (!photo) {
+      return response.status(404).send("Photo not found");
+    }
+
+    // Create the new comment
+    const newComment = {
+      comment: comment.trim(),
+      date_time: new Date(),
+      user_id: request.session.user._id
+    };
+
+    // Add comment to photo
+    photo.comments.push(newComment);
+    await photo.save();
+
+    // Return the newly created comment with user info
+    const user = await User.findById(request.session.user._id, '_id first_name last_name');
+    const commentWithUser = {
+      _id: photo.comments[photo.comments.length - 1]._id,
+      comment: newComment.comment,
+      date_time: newComment.date_time,
+      user: user
+    };
+
+    return response.status(200).json(commentWithUser);
+  } catch (err) {
+    console.error("Error adding comment:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
+/**
+ * POST /photos/new - Upload a new photo for the current user
+ */
+app.post("/photos/new", requireAuth, upload.single('photo'), async (request, response) => {
+  // Check if a file was uploaded
+  if (!request.file) {
+    return response.status(400).send("No file uploaded");
+  }
+
+  try {
+    // Create new photo document
+    const newPhoto = await Photo.create({
+      file_name: request.file.filename,
+      date_time: new Date(),
+      user_id: request.session.user._id,
+      comments: []
+    });
+
+    return response.status(200).json({
+      _id: newPhoto._id,
+      file_name: newPhoto.file_name,
+      date_time: newPhoto.date_time,
+      user_id: newPhoto.user_id
+    });
+  } catch (err) {
+    console.error("Error uploading photo:", err);
+    // Delete the uploaded file if database insertion fails
+    if (request.file) {
+      fs.unlink(join(__dirname, 'images', request.file.filename), (unlinkErr) => {
+        if (unlinkErr) console.error("Error deleting file:", unlinkErr);
+      });
+    }
+    return response.status(500).send("Server error");
   }
 });
 
