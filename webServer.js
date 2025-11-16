@@ -63,7 +63,7 @@ const requireAuth = (req, res, next) => {
   if (!req.session.user) {
     return res.status(401).send("Unauthorized");
   }
-  next();
+  return next();
 };
 
 mongoose.Promise = bluebird;
@@ -342,7 +342,7 @@ app.post("/admin/logout", (request, response) => {
     return response.status(400).send("No user is currently logged in");
   }
 
-  request.session.destroy((err) => {
+  return request.session.destroy((err) => {
     if (err) {
       console.error("Error destroying session:", err);
       return response.status(500).send("Server error");

@@ -1,8 +1,8 @@
+import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Box, Typography, Card, CardMedia, CardContent, Grid } from "@mui/material";
-import { useQuery } from '@tanstack/react-query';
+import { useQuery , useQueryClient } from '@tanstack/react-query';
 import { fetchUserName, fetchComments, fetchPhotosOfUser } from "../../api";
-import { useQueryClient } from '@tanstack/react-query';
 
 function UserComments() {
   const { userId } = useParams();

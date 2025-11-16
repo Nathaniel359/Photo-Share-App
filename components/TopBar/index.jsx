@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import {
   AppBar,
   Toolbar,
@@ -13,7 +13,7 @@ import {
   Box
 } from "@mui/material";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { fetchUserName, logoutUser, uploadPhoto } from "../../api";
 import useAdvancedStore from "../../store/useAdvancedStore";
 import useAuthStore from "../../store/useAuthStore";
@@ -33,8 +33,43 @@ function TopBar() {
   // Photo upload state
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadMessage, setUploadMessage] = useState(null);
+
+  // Logout mutation
+  const logoutMutation = useMutation({
+    mutationFn: logoutUser,
+    onSuccess: () => {
+      clearUser();
+      navigate('/login');
+    },
+    onError: () => {
+      // Even if the server call fails, clear local state
+      clearUser();
+      navigate('/login');
+    },
+  });
+
+  // Photo upload mutation
+  const uploadMutation = useMutation({
+    mutationFn: (file) => uploadPhoto(file),
+    onSuccess: () => {
+      // Invalidate photos query for the logged-in user
+      if (loggedInUser) {
+        queryClient.invalidateQueries(['photos', loggedInUser._id]);
+        // Also invalidate user counts to update photo count
+        queryClient.invalidateQueries(['users', 'counts']);
+      }
+
+      // Close dialog after a brief delay
+      setTimeout(() => {
+        setUploadDialogOpen(false);
+        setSelectedFile(null);
+        // Navigate to the user's photos page
+        if (loggedInUser) {
+          navigate(`/photos/${loggedInUser._id}`);
+        }
+      }, 1500);
+    },
+  });
 
   // Get username for title
   const { data: user, userIsLoading, userIsError } = useQuery({
@@ -76,29 +111,20 @@ function TopBar() {
     }
   };
 
-  const handleLogout = async () => {
-    try {
-      await logoutUser();
-      clearUser();
-      navigate('/login');
-    } catch (err) {
-      console.error('Logout error:', err);
-      // Even if the server call fails, clear local state
-      clearUser();
-      navigate('/login');
-    }
+  const handleLogout = () => {
+    logoutMutation.mutate();
   };
 
   const handleOpenUploadDialog = () => {
     setUploadDialogOpen(true);
     setSelectedFile(null);
-    setUploadMessage(null);
+    uploadMutation.reset();
   };
 
   const handleCloseUploadDialog = () => {
     setUploadDialogOpen(false);
     setSelectedFile(null);
-    setUploadMessage(null);
+    uploadMutation.reset();
   };
 
   const handleFileSelect = (event) => {
@@ -106,46 +132,19 @@ function TopBar() {
     if (file) {
       // Check if it's an image file
       if (!file.type.startsWith('image/')) {
-        setUploadMessage({ type: 'error', text: 'Please select an image file' });
         return;
       }
       setSelectedFile(file);
-      setUploadMessage(null);
+      uploadMutation.reset();
     }
   };
 
-  const handleUpload = async () => {
+  const handleUpload = () => {
     if (!selectedFile) {
-      setUploadMessage({ type: 'error', text: 'Please select a file' });
       return;
     }
 
-    setUploading(true);
-    setUploadMessage(null);
-
-    try {
-      await uploadPhoto(selectedFile);
-      setUploadMessage({ type: 'success', text: 'Photo uploaded successfully!' });
-
-      // Refetch photos for the logged-in user
-      if (loggedInUser) {
-        await queryClient.invalidateQueries(['photos', loggedInUser._id]);
-      }
-
-      // Close dialog after a brief delay
-      setTimeout(() => {
-        handleCloseUploadDialog();
-        // Navigate to the user's photos page
-        if (loggedInUser) {
-          navigate(`/photos/${loggedInUser._id}`);
-        }
-      }, 1500);
-    } catch (err) {
-      console.error('Upload error:', err);
-      setUploadMessage({ type: 'error', text: 'Failed to upload photo. Please try again.' });
-    } finally {
-      setUploading(false);
-    }
+    uploadMutation.mutate(selectedFile);
   };
 
   return (
@@ -186,9 +185,14 @@ function TopBar() {
       <Dialog open={uploadDialogOpen} onClose={handleCloseUploadDialog} maxWidth="sm" fullWidth>
         <DialogTitle>Upload New Photo</DialogTitle>
         <DialogContent>
-          {uploadMessage && (
-            <Alert severity={uploadMessage.type} sx={{ mb: 2 }}>
-              {uploadMessage.text}
+          {uploadMutation.isError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              Failed to upload photo. Please try again.
+            </Alert>
+          )}
+          {uploadMutation.isSuccess && (
+            <Alert severity="success" sx={{ mb: 2 }}>
+              Photo uploaded successfully!
             </Alert>
           )}
           <Box sx={{ mt: 2 }}>
@@ -196,7 +200,7 @@ function TopBar() {
               type="file"
               accept="image/*"
               onChange={handleFileSelect}
-              disabled={uploading}
+              disabled={uploadMutation.isPending}
               style={{ display: 'block', marginBottom: '1rem' }}
             />
             {selectedFile && (
@@ -207,15 +211,15 @@ function TopBar() {
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseUploadDialog} disabled={uploading}>
+          <Button onClick={handleCloseUploadDialog} disabled={uploadMutation.isPending}>
             Cancel
           </Button>
           <Button
             onClick={handleUpload}
             variant="contained"
-            disabled={!selectedFile || uploading}
+            disabled={!selectedFile || uploadMutation.isPending}
           >
-            {uploading ? 'Uploading...' : 'Upload'}
+            {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
           </Button>
         </DialogActions>
       </Dialog>

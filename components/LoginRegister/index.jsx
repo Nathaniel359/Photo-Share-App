@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   Card,
@@ -19,8 +20,6 @@ function LoginRegister() {
   // Login state
   const [loginName, setLoginName] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
 
   // Registration state
   const [regLoginName, setRegLoginName] = useState('');
@@ -31,100 +30,26 @@ function LoginRegister() {
   const [regLocation, setRegLocation] = useState('');
   const [regDescription, setRegDescription] = useState('');
   const [regOccupation, setRegOccupation] = useState('');
-  const [regError, setRegError] = useState('');
-  const [regSuccess, setRegSuccess] = useState('');
-  const [regLoading, setRegLoading] = useState(false);
 
   const navigate = useNavigate();
   const setUser = useAuthStore((state) => state.setUser);
+  const queryClient = useQueryClient();
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-    setLoginLoading(true);
-
-    if (!loginName.trim()) {
-      setLoginError('Please enter a login name');
-      setLoginLoading(false);
-      return;
-    }
-
-    if (!loginPassword.trim()) {
-      setLoginError('Please enter a password');
-      setLoginLoading(false);
-      return;
-    }
-
-    try {
-      const userData = await loginUser(loginName, loginPassword);
+  // Login mutation
+  const loginMutation = useMutation({
+    mutationFn: ({ login_name, password }) => loginUser(login_name, password),
+    onSuccess: (userData) => {
       setUser(userData);
       navigate(`/users/${userData._id}`);
-    } catch (err) {
-      if (err.response?.status === 400) {
-        setLoginError(err.response.data || 'Invalid login credentials');
-      } else {
-        setLoginError('An error occurred during login. Please try again.');
-      }
-    } finally {
-      setLoginLoading(false);
-    }
-  };
+    },
+  });
 
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setRegError('');
-    setRegSuccess('');
-    setRegLoading(true);
-
-    // Validation
-    if (!regLoginName.trim()) {
-      setRegError('Login name is required');
-      setRegLoading(false);
-      return;
-    }
-
-    if (!regPassword.trim()) {
-      setRegError('Password is required');
-      setRegLoading(false);
-      return;
-    }
-
-    if (!regPasswordConfirm.trim()) {
-      setRegError('Please confirm your password');
-      setRegLoading(false);
-      return;
-    }
-
-    if (regPassword !== regPasswordConfirm) {
-      setRegError('Passwords do not match');
-      setRegLoading(false);
-      return;
-    }
-
-    if (!regFirstName.trim()) {
-      setRegError('First name is required');
-      setRegLoading(false);
-      return;
-    }
-
-    if (!regLastName.trim()) {
-      setRegError('Last name is required');
-      setRegLoading(false);
-      return;
-    }
-
-    try {
-      await registerUser({
-        login_name: regLoginName.trim(),
-        password: regPassword,
-        first_name: regFirstName.trim(),
-        last_name: regLastName.trim(),
-        location: regLocation.trim(),
-        description: regDescription.trim(),
-        occupation: regOccupation.trim()
-      });
-
-      setRegSuccess('Registration successful! You can now log in.');
+  // Registration mutation
+  const registerMutation = useMutation({
+    mutationFn: (userData) => registerUser(userData),
+    onSuccess: () => {
+      // Invalidate users list to include the new user
+      queryClient.invalidateQueries(['users']);
 
       // Clear form
       setRegLoginName('');
@@ -135,15 +60,46 @@ function LoginRegister() {
       setRegLocation('');
       setRegDescription('');
       setRegOccupation('');
-    } catch (err) {
-      if (err.response?.status === 400) {
-        setRegError(err.response.data || 'Registration failed');
-      } else {
-        setRegError('An error occurred during registration. Please try again.');
-      }
-    } finally {
-      setRegLoading(false);
+    },
+  });
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    loginMutation.reset(); // Clear previous errors
+
+    if (!loginName.trim() || !loginPassword.trim()) {
+      return;
     }
+
+    loginMutation.mutate({
+      login_name: loginName,
+      password: loginPassword,
+    });
+  };
+
+  const handleRegister = (e) => {
+    e.preventDefault();
+    registerMutation.reset(); // Clear previous errors
+
+    // Validation
+    if (!regLoginName.trim() || !regPassword.trim() || !regPasswordConfirm.trim() ||
+        !regFirstName.trim() || !regLastName.trim()) {
+      return;
+    }
+
+    if (regPassword !== regPasswordConfirm) {
+      return;
+    }
+
+    registerMutation.mutate({
+      login_name: regLoginName.trim(),
+      password: regPassword,
+      first_name: regFirstName.trim(),
+      last_name: regLastName.trim(),
+      location: regLocation.trim(),
+      description: regDescription.trim(),
+      occupation: regOccupation.trim(),
+    });
   };
 
   return (
@@ -157,9 +113,9 @@ function LoginRegister() {
                 <Typography variant="h5" component="h2" gutterBottom>
                   Login
                 </Typography>
-                {loginError && (
+                {loginMutation.isError && (
                   <Alert severity="error" sx={{ mb: 2 }}>
-                    {loginError}
+                    {loginMutation.error?.response?.data || 'An error occurred during login. Please try again.'}
                   </Alert>
                 )}
                 <Box component="form" onSubmit={handleLogin} noValidate>
@@ -191,9 +147,9 @@ function LoginRegister() {
                     fullWidth
                     variant="contained"
                     sx={{ mt: 3, mb: 2 }}
-                    disabled={loginLoading}
+                    disabled={loginMutation.isPending}
                   >
-                    {loginLoading ? 'Logging in...' : 'Login'}
+                    {loginMutation.isPending ? 'Logging in...' : 'Login'}
                   </Button>
                 </Box>
               </CardContent>
@@ -207,14 +163,14 @@ function LoginRegister() {
                 <Typography variant="h5" component="h2" gutterBottom>
                   Register
                 </Typography>
-                {regError && (
+                {registerMutation.isError && (
                   <Alert severity="error" sx={{ mb: 2 }}>
-                    {regError}
+                    {registerMutation.error?.response?.data || 'An error occurred during registration. Please try again.'}
                   </Alert>
                 )}
-                {regSuccess && (
+                {registerMutation.isSuccess && (
                   <Alert severity="success" sx={{ mb: 2 }}>
-                    {regSuccess}
+                    Registration successful! You can now log in.
                   </Alert>
                 )}
                 <Box component="form" onSubmit={handleRegister} noValidate>
@@ -290,9 +246,9 @@ function LoginRegister() {
                     variant="contained"
                     color="primary"
                     sx={{ mt: 3, mb: 2 }}
-                    disabled={regLoading}
+                    disabled={registerMutation.isPending}
                   >
-                    {regLoading ? 'Registering...' : 'Register Me'}
+                    {registerMutation.isPending ? 'Registering...' : 'Register Me'}
                   </Button>
                 </Box>
               </CardContent>

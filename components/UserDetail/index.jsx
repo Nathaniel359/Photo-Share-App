@@ -1,8 +1,9 @@
+import React from "react";
 import { Typography, Card, CardContent, Link as MuiLink, Button } from "@mui/material";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from '@tanstack/react-query';
 import { fetchUserName } from "../../api";
-import useAdvancedStore from "../../store/useAdvancedStore"
+import useAdvancedStore from "../../store/useAdvancedStore";
 
 import './styles.css';
 

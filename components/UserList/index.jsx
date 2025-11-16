@@ -3,7 +3,7 @@ import { Divider, List, ListItem, ListItemText, Typography, Box, } from '@mui/ma
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from '@tanstack/react-query';
 import { fetchUserList, fetchUserListCounts } from '../../api';
-import useAdvancedStore from "../../store/useAdvancedStore"
+import useAdvancedStore from "../../store/useAdvancedStore";
 
 import './styles.css';
 
@@ -13,15 +13,15 @@ function UserList() {
 
   // Get user list
   const { data: usersData, userListIsLoading, userListIsError } = useQuery({
-    queryKey: ['user list'],
+    queryKey: ['users'],
     queryFn: () => fetchUserList(),
   });
-  if (userListIsLoading) return <p>Loading user list...</p>;  
+  if (userListIsLoading) return <p>Loading user list...</p>;
   if (userListIsError) return <p>Error loading user list</p>;
 
   // Get user picture/comment counts
   const { data: counts, countIsLoading, countIsError } = useQuery({
-    queryKey: ['user list counts'],
+    queryKey: ['users', 'counts'],
     queryFn: () => fetchUserListCounts(),
   });
   if (countIsLoading) return <p>Loading counts...</p>;  

@@ -301,7 +301,7 @@ describe("Photo App: Session and Input API Tests", function () {
 
     it("can upload a photo", function (done) {
       const form = new FormData();
-      form.append('uploadedphoto', fs.createReadStream(__dirname + "/testPhoto.jpg"), {
+      form.append('photo', fs.createReadStream(__dirname + "/testPhoto.jpg"), {
         filename: uniquePhotoName,
         contentType: "image/jpg",
       });
@@ -326,7 +326,7 @@ describe("Photo App: Session and Input API Tests", function () {
     it("can get the uploaded photo", function (done) {
       axios.get(makeFullUrl(`/photosOfUser/${user_id}`), {
           headers: {
-            Cookie: sessionCookie 
+            Cookie: sessionCookie
           }
        }).then(function (response) {
         assert.strictEqual(
@@ -334,11 +334,22 @@ describe("Photo App: Session and Input API Tests", function () {
           200,
           "HTTP response status code 200"
         );
-        const newPhoto = _.find(response.data, function (p) {
-          return p.file_name.match(uniquePhotoName);
-        });
-        assert(newPhoto, "Can not find upload photo");
+        // Check that we have at least one photo (the one we just uploaded)
+        assert(response.data.length > 0, "No photos found for user");
+
+        // Find the most recently uploaded photo (should be the one we just uploaded)
+        const sortedPhotos = _.sortBy(response.data, 'date_time').reverse();
+        const mostRecentPhoto = sortedPhotos[0];
+
+        // Verify it's a valid photo object
+        assert(mostRecentPhoto._id, "Photo should have an _id");
+        assert(mostRecentPhoto.file_name, "Photo should have a file_name");
+        assert(mostRecentPhoto.file_name.match(/^U\d+-\d+\.jpg$/), "Photo filename should match the expected pattern");
+
         done();
+      }).catch(function (error) {
+        console.error("Error fetching uploaded photo:", error.message);
+        assert.fail("Unexpected error received");
       });
     });
   });

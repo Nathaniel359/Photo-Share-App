@@ -7,7 +7,7 @@ const useAdvancedStore = create(
       advancedMode: false,
       setAdvancedMode: (value) => set({ advancedMode: value }),
     }),
-    { name: "advancedMode" } 
+    { name: "advancedMode" }
   )
 );
 

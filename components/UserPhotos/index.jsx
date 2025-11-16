@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Typography, Grid, Card, CardMedia, CardContent, CardHeader, Divider, Button, TextField, Box } from "@mui/material";
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { fetchUserName, fetchPhotosOfUser, addComment } from "../../api";
-import useAdvancedStore from "../../store/useAdvancedStore"
+import useAdvancedStore from "../../store/useAdvancedStore";
 
 import "./styles.css";
 
@@ -17,7 +17,23 @@ function UserPhotos() {
 
   // State for adding comments
   const [newComment, setNewComment] = useState({});
-  const [submitting, setSubmitting] = useState({});
+
+  // Comment mutation
+  const addCommentMutation = useMutation({
+    mutationFn: ({ photoId, commentText }) => addComment(photoId, commentText),
+    onSuccess: (data, variables) => {
+      // Clear the input for this photo
+      setNewComment((prev) => ({ ...prev, [variables.photoId]: '' }));
+
+      // Invalidate photos query to refetch with new comment
+      queryClient.invalidateQueries(['photos', userId]);
+      // Also invalidate user counts to update comment count
+      queryClient.invalidateQueries(['users', 'counts']);
+    },
+    onError: (error) => {
+      console.error('Failed to add comment:', error);
+    },
+  });
 
   useEffect(() => {
     if (photoIndex && !advancedMode) {
@@ -51,28 +67,18 @@ function UserPhotos() {
   if (!photos) return null;
 
   // Handle adding a comment
-  const handleAddComment = async (photoId) => {
+  const handleAddComment = (photoId) => {
     const commentText = newComment[photoId];
     if (!commentText || !commentText.trim()) {
       return;
     }
 
-    setSubmitting({ ...submitting, [photoId]: true });
+    addCommentMutation.mutate({ photoId, commentText });
+  };
 
-    try {
-      await addComment(photoId, commentText);
-
-      // Clear the input
-      setNewComment({ ...newComment, [photoId]: '' });
-
-      // Refetch photos to show the new comment
-      await queryClient.invalidateQueries(['photos', userId]);
-    } catch (err) {
-      console.error('Error adding comment:', err);
-      alert('Failed to add comment. Please try again.');
-    } finally {
-      setSubmitting({ ...submitting, [photoId]: false });
-    }
+  // Helper to check if a specific photo's comment is being submitted
+  const isSubmitting = (photoId) => {
+    return addCommentMutation.isPending && addCommentMutation.variables?.photoId === photoId;
   };
 
   // regular view
@@ -122,16 +128,16 @@ function UserPhotos() {
                       placeholder="Write your comment here..."
                       value={newComment[photo._id] || ''}
                       onChange={(e) => setNewComment({ ...newComment, [photo._id]: e.target.value })}
-                      disabled={submitting[photo._id]}
+                      disabled={isSubmitting(photo._id)}
                     />
                     <Button
                       variant="contained"
                       color="primary"
                       onClick={() => handleAddComment(photo._id)}
-                      disabled={submitting[photo._id] || !newComment[photo._id]?.trim()}
+                      disabled={isSubmitting(photo._id) || !newComment[photo._id]?.trim()}
                       sx={{ mt: 1 }}
                     >
-                      {submitting[photo._id] ? 'Adding...' : 'Add Comment'}
+                      {isSubmitting(photo._id) ? 'Adding...' : 'Add Comment'}
                     </Button>
                   </Box>
                 </CardContent>
@@ -196,16 +202,16 @@ function UserPhotos() {
               placeholder="Write your comment here..."
               value={newComment[photo._id] || ''}
               onChange={(e) => setNewComment({ ...newComment, [photo._id]: e.target.value })}
-              disabled={submitting[photo._id]}
+              disabled={isSubmitting(photo._id)}
             />
             <Button
               variant="contained"
               color="primary"
               onClick={() => handleAddComment(photo._id)}
-              disabled={submitting[photo._id] || !newComment[photo._id]?.trim()}
+              disabled={isSubmitting(photo._id) || !newComment[photo._id]?.trim()}
               sx={{ mt: 1 }}
             >
-              {submitting[photo._id] ? 'Adding...' : 'Add Comment'}
+              {isSubmitting(photo._id) ? 'Adding...' : 'Add Comment'}
             </Button>
           </Box>
         </CardContent>
