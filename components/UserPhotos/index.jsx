@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { Typography, Grid, Card, CardMedia, CardContent, CardHeader, Divider, Button, TextField, Box } from "@mui/material";
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchUserName, fetchPhotosOfUser, addComment } from "../../api";
-import useAdvancedStore from "../../store/useAdvancedStore"
+import useAdvancedStore from "../../store/useAdvancedStore";
 
 import "./styles.css";
 

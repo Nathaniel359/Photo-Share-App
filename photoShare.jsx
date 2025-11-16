@@ -1,3 +1,4 @@
+import React from "react";
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import ReactDOM from 'react-dom/client';
@@ -57,43 +58,43 @@ function PhotoShare() {
                   <Route path="/login" element={<LoginRegister />} />
                   <Route
                     path="/users/:userId"
-                    element={
+                    element={(
                       <ProtectedRoute>
                         <UserDetail />
                       </ProtectedRoute>
-                    }
+                    )}
                   />
                   <Route
                     path="/photos/:userId"
-                    element={
+                    element={(
                       <ProtectedRoute>
                         <UserPhotos />
                       </ProtectedRoute>
-                    }
+                    )}
                   />
                   <Route
                     path="/photos/:userId/:photoIndex"
-                    element={
+                    element={(
                       <ProtectedRoute>
                         <UserPhotos />
                       </ProtectedRoute>
-                    }
+                    )}
                   />
                   <Route
                     path="/users"
-                    element={
+                    element={(
                       <ProtectedRoute>
                         <UserList />
                       </ProtectedRoute>
-                    }
+                    )}
                   />
                   <Route
                     path="/comments/:userId"
-                    element={
+                    element={(
                       <ProtectedRoute>
                         <UserComments />
                       </ProtectedRoute>
-                    }
+                    )}
                   />
                   <Route
                     path="/"

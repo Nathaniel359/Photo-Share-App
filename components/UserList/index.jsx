@@ -3,7 +3,7 @@ import { Divider, List, ListItem, ListItemText, Typography, Box, } from '@mui/ma
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from '@tanstack/react-query';
 import { fetchUserList, fetchUserListCounts } from '../../api';
-import useAdvancedStore from "../../store/useAdvancedStore"
+import useAdvancedStore from "../../store/useAdvancedStore";
 
 import './styles.css';
 
