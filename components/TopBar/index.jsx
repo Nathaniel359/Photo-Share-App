@@ -10,11 +10,16 @@ import {
   DialogContent,
   DialogActions,
   Alert,
-  Box
+  Box,
+  FormControl,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
+  Checkbox,
 } from "@mui/material";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { fetchUserName, logoutUser, uploadPhoto } from "../../api";
+import { fetchUserName, logoutUser, uploadPhoto, fetchUserList } from "../../api";
 import useAdvancedStore from "../../store/useAdvancedStore";
 import useAuthStore from "../../store/useAuthStore";
 
@@ -33,6 +38,13 @@ function TopBar() {
   // Photo upload state
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [sharingList, setSharingList] = useState(null);
+
+  const { data: userList } = useQuery({
+    queryKey: ['users', 'list'],
+    queryFn: fetchUserList,
+    enabled: !!loggedInUser,
+  });
 
   // Logout mutation
   const logoutMutation = useMutation({
@@ -50,7 +62,7 @@ function TopBar() {
 
   // Photo upload mutation
   const uploadMutation = useMutation({
-    mutationFn: (file) => uploadPhoto(file),
+    mutationFn: ({ file, sharingList }) => uploadPhoto(file, sharingList),
     onSuccess: () => {
       // Invalidate photos query for the logged-in user
       if (loggedInUser) {
@@ -146,7 +158,10 @@ function TopBar() {
       return;
     }
 
-    uploadMutation.mutate(selectedFile);
+    uploadMutation.mutate({
+      file: selectedFile,
+      sharingList,
+    });
   };
 
   return (
@@ -162,6 +177,9 @@ function TopBar() {
               <Typography variant="body1">
                 Hi {loggedInUser.first_name}
               </Typography>
+              <Button color="inherit" variant="outlined" onClick={() => navigate('/activities')}>
+                Activities
+              </Button>
               <Button color="inherit" variant="outlined" onClick={handleOpenUploadDialog}>
                 Add Photo
               </Button>
@@ -209,6 +227,66 @@ function TopBar() {
               <Typography variant="body2">
                 Selected: {selectedFile.name}
               </Typography>
+            )}
+          </Box>
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="subtitle1" sx={{ mb: 1 }}>
+              Who can see this photo?
+            </Typography>
+
+            <FormControl fullWidth>
+              <RadioGroup
+                value={
+                  sharingList === null
+                    ? "public"
+                    : sharingList.length === 0
+                      ? "onlyMe"
+                      : "custom"
+                }
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "public") setSharingList(null);
+                  else if (v === "onlyMe") setSharingList([]);
+                  else if (v === "custom") setSharingList([]);
+                }}
+              >
+                <FormControlLabel value="public" control={<Radio />} label="Public (everyone can see)" />
+                <FormControlLabel value="onlyMe" control={<Radio />} label="Only Me" />
+                <FormControlLabel value="custom" control={<Radio />} label="Specific users…" />
+              </RadioGroup>
+            </FormControl>
+
+            {Array.isArray(sharingList) && loggedInUser && (
+              <Box sx={{ ml: 2, mt: 1 }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Select users:
+                </Typography>
+
+                {userList?.map((user) => {
+                  const isOwner = user._id === loggedInUser._id;
+                  return (
+                    <FormControlLabel
+                      key={user._id}
+                      control={
+                        <Checkbox
+                          checked={isOwner || sharingList.includes(user._id)}
+                          disabled={isOwner}
+                          onChange={() => {
+                            setSharingList((prev) => {
+                              if (prev.includes(user._id)) {
+                                return prev.filter((id) => id !== user._id);
+                              } else {
+                                return [...prev, user._id];
+                              }
+                            });
+                          }}
+                        />
+                      }
+                      label={`${user.first_name} ${user.last_name}`}
+                    />
+                  );
+                })}
+              </Box>
             )}
           </Box>
         </DialogContent>

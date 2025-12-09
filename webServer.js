@@ -15,6 +15,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import async from "async";
 import fs from "fs";
+import { Server } from 'socket.io';
+import { logActivity } from "./utils/activityLogger.js";
 
 // ToDO - Your submission should work without this line. Comment out or delete this line for tests and before submission!
 // import models from "./modelData/photoApp.js";
@@ -24,6 +26,7 @@ import fs from "fs";
 import User from "./schema/user.js";
 import Photo from "./schema/photo.js";
 import SchemaInfo from "./schema/schemaInfo.js";
+import Activity from "./schema/activity.js";
 
 const portno = 3001; // Port number to use
 const app = express();
@@ -157,13 +160,32 @@ app.get('/user/list', requireAuth, async (request, response) => {
  */
 app.get('/user/list/counts', requireAuth, async (request, response) => {
   try {
+    const currentUserId = request.session.user._id;
     const users = await User.find({}, '_id first_name last_name');
-    const photos = await Photo.find({}, 'user_id comments.user_id');
+    const photos = await Photo.find({}, 'user_id comments sharing_list');
 
     const counts = users.map((user) => {
-      const photoCount = photos.filter((p) => p.user_id.equals(user._id)).length;
+      // Filter visible photos
+      const visiblePhotos = photos.filter((p) => {
+        const isOwner = p.user_id.equals(currentUserId);
 
-      const commentCount = photos.reduce((acc, p) => {
+        // Public (no list)
+        if (!p.sharing_list || p.sharing_list === null) {
+          return true;
+        }
+
+        // Owner only
+        if (Array.isArray(p.sharing_list) && p.sharing_list.length === 0) {
+          return isOwner;
+        }
+
+        // Allow included users to see
+        return isOwner || p.sharing_list.includes(currentUserId);
+      });
+
+      const photoCount = visiblePhotos.filter((p) => p.user_id.equals(user._id)).length;
+
+      const commentCount = visiblePhotos.reduce((acc, p) => {
         if (!p.comments) return acc;
         const userComments = p.comments.filter(
           (c) => c.user_id && c.user_id.equals(user._id)
@@ -215,6 +237,7 @@ app.get('/user/:id', requireAuth, async (request, response) => {
  */
 app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
   const { id } = request.params;
+  const currentUserId = request.session.user._id.toString(); 
 
   // Check if id is valid
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -229,10 +252,28 @@ app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
     }
 
     // Fetch all photos as JS objects
-    const photos = await Photo.find({ user_id: id }, '_id user_id comments file_name date_time').lean();
+    const photos = await Photo.find({ user_id: id }, '_id user_id comments file_name date_time sharing_list').lean();
+
+    // Filter out photos the current user is not allowed to see
+    const visiblePhotos = photos.filter((p) => {
+      const isOwner = p.user_id.toString() === currentUserId;
+
+      // Public (no list)
+      if (!p.sharing_list || p.sharing_list === null) {
+        return true;
+      }
+
+      // Owner only
+      if (Array.isArray(p.sharing_list) && p.sharing_list.length === 0) {
+        return isOwner;
+      }
+
+      // Allow included users to see
+      return isOwner || p.sharing_list.map(id => id.toString()).includes(currentUserId);
+    });
 
     // Fetch user info for each comment for each photo concurrently
-    await async.each(photos, async (photo) => {
+    await async.each(visiblePhotos, async (photo) => {
       if (photo.comments && photo.comments.length > 0) {
         const updatedComments = await Promise.all(
           photo.comments.map(async (comment) => {
@@ -249,7 +290,7 @@ app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
       }
     });
 
-    return response.status(200).json(photos);
+    return response.status(200).json(visiblePhotos);
   } catch (err) {
     console.error('Error retrieving photos', err);
     return response.status(500).json();
@@ -258,26 +299,47 @@ app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
 
 app.get("/comments/:userId", requireAuth, async (request, response) => {
   const { userId } = request.params;
+  const currentUserId = request.session.user._id.toString();
 
   try {
     const photos = await Photo.find(
       { "comments.user_id": userId }, // only photos with the user's comments
-      "file_name user_id comments"
-    );
+      "file_name user_id comments sharing_list"
+    ).lean();
 
     const userComments = [];
 
-    photos.forEach((photo) => {
-      if (!photo.comments) return;
+    photos.forEach((p) => {
+      const isOwner = p.user_id.toString() === currentUserId;
 
-      photo.comments.forEach((c) => {
+      let visible = false;
+      // Public (no list)
+      if (!p.sharing_list || p.sharing_list === null) {
+        visible = true;
+      }
+
+      // Owner only
+      else if (Array.isArray(p.sharing_list) && p.sharing_list.length === 0) {
+        visible = isOwner;
+      }
+
+      // Allow included users to see
+      else if (Array.isArray(p.sharing_list)){
+        visible = isOwner || p.sharing_list.map(id => id.toString()).includes(currentUserId);
+      }
+
+      if (!visible) return; // skip photos not visible
+
+      if (!p.comments) return;
+
+      p.comments.forEach((c) => {
         if (c.user_id.toString() === userId) {
           userComments.push({
             comment: c.comment,
             commentId: c._id,
-            photoId: photo._id,
-            file_name: photo.file_name,
-            photoUserId: photo.user_id,
+            photoId: p._id,
+            file_name: p.file_name,
+            photoUserId: p.user_id,
           });
         }
       });
@@ -288,6 +350,17 @@ app.get("/comments/:userId", requireAuth, async (request, response) => {
     console.error("Error fetching user comments:", err);
     response.status(500).json({ message: "Server error" });
   }
+});
+
+app.get('/activities', requireAuth, async (request, response) => {
+  const activities = await Activity.find({})
+    .sort({ created_at: -1 })
+    .limit(5)
+    .populate('user_id', '_id first_name last_name')
+    .populate('photo_id', 'file_name')
+    .lean();
+
+  response.json(activities);
 });
 
 /**
@@ -323,6 +396,9 @@ app.post("/admin/login", async (request, response) => {
       last_name: user.last_name
     };
 
+    // Log activity
+    await logActivity(io, { user: request.session.user, type: "USER_LOGIN"});
+
     return response.status(200).json({
       _id: user._id,
       first_name: user.first_name,
@@ -337,10 +413,13 @@ app.post("/admin/login", async (request, response) => {
 /**
  * POST /admin/logout - Logout the current user
  */
-app.post("/admin/logout", (request, response) => {
+app.post("/admin/logout", async (request, response) => {
   if (!request.session.user) {
     return response.status(400).send("No user is currently logged in");
   }
+
+  // Log activity
+  await logActivity(io, { user: request.session.user, type: "USER_LOGOUT"});
 
   return request.session.destroy((err) => {
     if (err) {
@@ -391,6 +470,9 @@ app.post("/user", async (request, response) => {
       description: description || "",
       occupation: occupation || ""
     });
+
+    // Log activity
+    await logActivity(io, { user: request.session.user, type: "USER_REGISTER"});
 
     return response.status(200).json({
       login_name: newUser.login_name,
@@ -448,6 +530,9 @@ app.post("/commentsOfPhoto/:photo_id", requireAuth, async (request, response) =>
       user: user
     };
 
+    // Log activity
+    await logActivity(io, { user: request.session.user, type: "COMMENT", photo });
+
     return response.status(200).json(commentWithUser);
   } catch (err) {
     console.error("Error adding comment:", err);
@@ -465,19 +550,35 @@ app.post("/photos/new", requireAuth, upload.single('photo'), async (request, res
   }
 
   try {
+    // Parse sharing_list from the formData
+    let sharingList;
+
+    if (request.body.sharing_list === "null" || request.body.sharing_list === undefined) {
+      // Public
+      sharingList = undefined;
+    } else {
+      // [] or [userIDs]
+      sharingList = JSON.parse(request.body.sharing_list);
+    }
+    
     // Create new photo document
     const newPhoto = await Photo.create({
       file_name: request.file.filename,
       date_time: new Date(),
       user_id: request.session.user._id,
-      comments: []
+      comments: [],
+      sharing_list: sharingList,
     });
+
+    // Log activity
+    await logActivity(io, { user: request.session.user, type: "PHOTO_UPLOAD", photo: newPhoto });
 
     return response.status(200).json({
       _id: newPhoto._id,
       file_name: newPhoto.file_name,
       date_time: newPhoto.date_time,
-      user_id: newPhoto.user_id
+      user_id: newPhoto.user_id,
+      sharing_list: newPhoto.sharing_list
     });
   } catch (err) {
     console.error("Error uploading photo:", err);
@@ -500,3 +601,9 @@ const server = app.listen(portno, function () {
       __dirname
   );
 });
+
+const io = new Server(server, {
+  cors: { origin: "http://localhost:3000", credentials: true }
+});
+
+export default io;

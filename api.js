@@ -56,13 +56,22 @@ export const addComment = async (photoId, comment) => {
 };
 
 // Photos
-export const uploadPhoto = async (file) => {
+export const uploadPhoto = async (file, sharingList) => {
     const formData = new FormData();
     formData.append('photo', file);
+    formData.append('sharing_list', JSON.stringify(sharingList ?? null));
     const res = await axios.post('http://localhost:3001/photos/new', formData, {
         headers: {
             'Content-Type': 'multipart/form-data'
         }
     });
     return res.data;
+};
+
+// Activities
+export const fetchActivities = async () => {
+  const res = await axios.get("http://localhost:3001/activities", {
+    withCredentials: true
+  });
+  return res.data;
 };

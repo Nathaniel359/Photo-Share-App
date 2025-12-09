@@ -16,6 +16,7 @@ import UserList from './components/UserList';
 import UserPhotos from './components/UserPhotos';
 import UserComments from './components/UserComments';
 import LoginRegister from './components/LoginRegister';
+import Activities from './components/Activities';
 import useAuthStore from './store/useAuthStore';
 
 // Protected Route Component
@@ -104,6 +105,7 @@ function PhotoShare() {
                         <Navigate to="/login" replace />
                     }
                   />
+                  <Route path="/activities" element={<Activities />} />
                 </Routes>
               </Paper>
             </Grid>

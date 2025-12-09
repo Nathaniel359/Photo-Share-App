@@ -26,6 +26,11 @@ const photoSchema = new mongoose.Schema({
   user_id: mongoose.Schema.Types.ObjectId,
   // Array of comment objects representing the comments made on this photo.
   comments: [commentSchema],
+  // Empty array means only owner can see, undefined means no list is specified
+  sharing_list: {
+    type: [mongoose.Schema.Types.ObjectId],
+    default: undefined,  // IMPORTANT: differentiate “no list specified” from []
+  },
 });
 
 /**
