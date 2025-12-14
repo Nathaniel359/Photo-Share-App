@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { Typography, Grid, Card, CardMedia, CardContent, CardHeader, Divider, Button, TextField, Box } from "@mui/material";
+import { Typography, Grid, Card, CardMedia, CardContent, CardHeader, Divider, Button, TextField, Box, IconButton, Dialog, DialogTitle, DialogContent, DialogActions } from "@mui/material";
+import { Favorite, FavoriteBorder, Delete } from "@mui/icons-material";
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { fetchUserName, fetchPhotosOfUser, addComment } from "../../api";
+import { fetchUserName, fetchPhotosOfUser, addComment, likePhoto, unlikePhoto, deletePhoto, deleteComment } from "../../api";
 import useAdvancedStore from "../../store/useAdvancedStore";
+import useAuthStore from "../../store/useAuthStore";
 
 import "./styles.css";
 
@@ -13,10 +15,13 @@ function UserPhotos() {
   const navigate = useNavigate();
   const advancedMode = useAdvancedStore((s) => s.advancedMode);
   const setAdvancedMode = useAdvancedStore((s) => s.setAdvancedMode);
+  const loggedInUser = useAuthStore((state) => state.user);
   const queryClient = useQueryClient();
 
   // State for adding comments
   const [newComment, setNewComment] = useState({});
+  // State for delete photo dialog
+  const [deletePhotoDialog, setDeletePhotoDialog] = useState({ open: false, photoId: null });
 
   // Comment mutation
   const addCommentMutation = useMutation({
@@ -32,6 +37,46 @@ function UserPhotos() {
     },
     onError: (error) => {
       console.error('Failed to add comment:', error);
+    },
+  });
+
+  // Like mutation
+  const likeMutation = useMutation({
+    mutationFn: (photoId) => likePhoto(photoId),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['photos', userId]);
+    },
+  });
+
+  // Unlike mutation
+  const unlikeMutation = useMutation({
+    mutationFn: (photoId) => unlikePhoto(photoId),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['photos', userId]);
+    },
+  });
+
+  // Delete photo mutation
+  const deletePhotoMutation = useMutation({
+    mutationFn: (photoId) => deletePhoto(photoId),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['photos', userId]);
+      queryClient.invalidateQueries(['users', 'counts']);
+      setDeletePhotoDialog({ open: false, photoId: null });
+      // If in advanced mode and this was the last photo, navigate back
+      // eslint-disable-next-line no-use-before-define
+      if (advancedMode && photos && photos.length === 1) {
+        navigate(`/users/${userId}`);
+      }
+    },
+  });
+
+  // Delete comment mutation
+  const deleteCommentMutation = useMutation({
+    mutationFn: ({ photoId, commentId }) => deleteComment(photoId, commentId),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['photos', userId]);
+      queryClient.invalidateQueries(['users', 'counts']);
     },
   });
 
@@ -81,6 +126,34 @@ function UserPhotos() {
     return addCommentMutation.isPending && addCommentMutation.variables?.photoId === photoId;
   };
 
+  // Handle like/unlike toggle
+  const handleLikeToggle = (photo) => {
+    if (!loggedInUser) return;
+
+    const hasLiked = photo.likes?.includes(loggedInUser._id);
+    if (hasLiked) {
+      unlikeMutation.mutate(photo._id);
+    } else {
+      likeMutation.mutate(photo._id);
+    }
+  };
+
+  // Handle delete photo
+  const handleDeletePhoto = (photoId) => {
+    setDeletePhotoDialog({ open: true, photoId });
+  };
+
+  const confirmDeletePhoto = () => {
+    if (deletePhotoDialog.photoId) {
+      deletePhotoMutation.mutate(deletePhotoDialog.photoId);
+    }
+  };
+
+  // Handle delete comment
+  const handleDeleteComment = (photoId, commentId) => {
+    deleteCommentMutation.mutate({ photoId, commentId });
+  };
+
   // regular view
   if (!advancedMode) {
     return (
@@ -90,34 +163,75 @@ function UserPhotos() {
         </Typography>
 
         <Grid container spacing={1}>
-          {photos.map((photo) => (
-            <Grid item xs={10} key={photo._id}>
-              <Card>
-                <CardHeader
-                  title={`Uploaded: ${new Date(photo.date_time).toLocaleString()}`}
-                />
-                <CardMedia
-                  component="img"
-                  image={`/images/${photo.file_name}`}
-                  alt="User photo"
-                />
-                <CardContent>
+          {photos.map((photo) => {
+            const hasLiked = photo.likes?.includes(loggedInUser?._id);
+            const likeCount = photo.likes?.length || 0;
+            const isOwner = loggedInUser?._id === photo.user_id;
+
+            return (
+              <Grid item xs={10} key={photo._id}>
+                <Card>
+                  <CardHeader
+                    title={`Uploaded: ${new Date(photo.date_time).toLocaleString()}`}
+                    action={
+                      isOwner && (
+                        <IconButton
+                          aria-label="delete photo"
+                          onClick={() => handleDeletePhoto(photo._id)}
+                          color="error"
+                        >
+                          <Delete />
+                        </IconButton>
+                      )
+                    }
+                  />
+                  <CardMedia
+                    component="img"
+                    image={`/images/${photo.file_name}`}
+                    alt="User photo"
+                  />
+                  <CardContent>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      <IconButton
+                        onClick={() => handleLikeToggle(photo)}
+                        color="error"
+                        disabled={likeMutation.isPending || unlikeMutation.isPending}
+                      >
+                        {hasLiked ? <Favorite /> : <FavoriteBorder />}
+                      </IconButton>
+                      <Typography variant="body2">
+                        {likeCount} {likeCount === 1 ? 'like' : 'likes'}
+                      </Typography>
+                    </Box>
                   <Typography variant="body1">Comments:</Typography>
                   {(photo.comments || []).length === 0 && (
                     <Typography variant="body2">No comments yet.</Typography>
                   )}
 
-                  {(photo.comments || []).map((comment) => (
-                    <div key={comment._id} style={{ marginBottom: "10px" }}>
-                      <Typography variant="body2">
-                        <Link to={`/users/${comment.user._id}`}>
-                          {comment.user.first_name} {comment.user.last_name}
-                        </Link>{" "}
-                        ({new Date(comment.date_time).toLocaleString()}): {comment.comment}
-                      </Typography>
-                      <Divider />
-                    </div>
-                  ))}
+                  {(photo.comments || []).map((comment) => {
+                    const isCommentOwner = loggedInUser?._id === comment.user._id;
+                    return (
+                      <Box key={comment._id} sx={{ mb: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                        <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                          <Link to={`/users/${comment.user._id}`}>
+                            {comment.user.first_name} {comment.user.last_name}
+                          </Link>{" "}
+                          ({new Date(comment.date_time).toLocaleString()}): {comment.comment}
+                        </Typography>
+                        {isCommentOwner && (
+                          <IconButton
+                            size="small"
+                            onClick={() => handleDeleteComment(photo._id, comment._id)}
+                            disabled={deleteCommentMutation.isPending}
+                            color="error"
+                          >
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        )}
+                        <Divider />
+                      </Box>
+                    );
+                  })}
 
                   <Box sx={{ mt: 2 }}>
                     <Typography variant="body1" sx={{ mb: 1 }}>Add a comment:</Typography>
@@ -140,11 +254,26 @@ function UserPhotos() {
                       {isSubmitting(photo._id) ? 'Adding...' : 'Add Comment'}
                     </Button>
                   </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
+                  </CardContent>
+                </Card>
+              </Grid>
+            );
+          })}
         </Grid>
+
+        {/* Delete Photo Confirmation Dialog */}
+        <Dialog open={deletePhotoDialog.open} onClose={() => setDeletePhotoDialog({ open: false, photoId: null })}>
+          <DialogTitle>Delete Photo?</DialogTitle>
+          <DialogContent>
+            <Typography>Are you sure you want to delete this photo? This action cannot be undone.</Typography>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setDeletePhotoDialog({ open: false, photoId: null })}>Cancel</Button>
+            <Button onClick={confirmDeletePhoto} color="error" variant="contained">
+              Delete
+            </Button>
+          </DialogActions>
+        </Dialog>
       </div>
     );
   }
@@ -161,6 +290,10 @@ function UserPhotos() {
   }
   if (!photo) return null;
 
+  const hasLiked = photo.likes?.includes(loggedInUser?._id);
+  const likeCount = photo.likes?.length || 0;
+  const isOwner = loggedInUser?._id === photo.user_id;
+
   return (
     <div className="user-photos">
       <Typography variant="h2">
@@ -168,8 +301,19 @@ function UserPhotos() {
       </Typography>
 
       <Card>
-        <CardHeader 
-          title={`Uploaded: ${new Date(photo.date_time).toLocaleString()}`} 
+        <CardHeader
+          title={`Uploaded: ${new Date(photo.date_time).toLocaleString()}`}
+          action={
+            isOwner && (
+              <IconButton
+                aria-label="delete photo"
+                onClick={() => handleDeletePhoto(photo._id)}
+                color="error"
+              >
+                <Delete />
+              </IconButton>
+            )
+          }
         />
         <CardMedia
           component="img"
@@ -177,21 +321,46 @@ function UserPhotos() {
           alt="User photo"
         />
         <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <IconButton
+              onClick={() => handleLikeToggle(photo)}
+              color="error"
+              disabled={likeMutation.isPending || unlikeMutation.isPending}
+            >
+              {hasLiked ? <Favorite /> : <FavoriteBorder />}
+            </IconButton>
+            <Typography variant="body2">
+              {likeCount} {likeCount === 1 ? 'like' : 'likes'}
+            </Typography>
+          </Box>
           <Typography variant="body1">Comments:</Typography>
           {(photo.comments || []).length === 0 && (
             <Typography variant="body2">No comments yet.</Typography>
           )}
-          {(photo.comments || []).map((comment) => (
-            <div key={comment._id} style={{ marginBottom: "10px" }}>
-              <Typography variant="body2">
-                <Link to={`/users/${comment.user._id}`}>
-                  {comment.user.first_name} {comment.user.last_name}
-                </Link>{" "}
-                ({new Date(comment.date_time).toLocaleString()}): {comment.comment}
-              </Typography>
-              <Divider />
-            </div>
-          ))}
+          {(photo.comments || []).map((comment) => {
+            const isCommentOwner = loggedInUser?._id === comment.user._id;
+            return (
+              <Box key={comment._id} sx={{ mb: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                  <Link to={`/users/${comment.user._id}`}>
+                    {comment.user.first_name} {comment.user.last_name}
+                  </Link>{" "}
+                  ({new Date(comment.date_time).toLocaleString()}): {comment.comment}
+                </Typography>
+                {isCommentOwner && (
+                  <IconButton
+                    size="small"
+                    onClick={() => handleDeleteComment(photo._id, comment._id)}
+                    disabled={deleteCommentMutation.isPending}
+                    color="error"
+                  >
+                    <Delete fontSize="small" />
+                  </IconButton>
+                )}
+                <Divider />
+              </Box>
+            );
+          })}
 
           <Box sx={{ mt: 2 }}>
             <Typography variant="body1" sx={{ mb: 1 }}>Add a comment:</Typography>
@@ -234,6 +403,20 @@ function UserPhotos() {
           Next
         </Button>
       </div>
+
+      {/* Delete Photo Confirmation Dialog */}
+      <Dialog open={deletePhotoDialog.open} onClose={() => setDeletePhotoDialog({ open: false, photoId: null })}>
+        <DialogTitle>Delete Photo?</DialogTitle>
+        <DialogContent>
+          <Typography>Are you sure you want to delete this photo? This action cannot be undone.</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeletePhotoDialog({ open: false, photoId: null })}>Cancel</Button>
+          <Button onClick={confirmDeletePhoto} color="error" variant="contained">
+            Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   );
 }

@@ -29,7 +29,12 @@ const photoSchema = new mongoose.Schema({
   // Empty array means only owner can see, undefined means no list is specified
   sharing_list: {
     type: [mongoose.Schema.Types.ObjectId],
-    default: undefined,  // IMPORTANT: differentiate “no list specified” from []
+    default: undefined,  // IMPORTANT: differentiate "no list specified" from []
+  },
+  // Array of user IDs who have liked this photo
+  likes: {
+    type: [mongoose.Schema.Types.ObjectId],
+    default: [],
   },
 });
 

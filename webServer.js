@@ -16,7 +16,7 @@ import { dirname, join } from 'path';
 import async from "async";
 import fs from "fs";
 import { Server } from 'socket.io';
-import { logActivity } from "./utils/activityLogger.js";
+import logActivity from "./utils/activityLogger.js";
 
 // ToDO - Your submission should work without this line. Comment out or delete this line for tests and before submission!
 // import models from "./modelData/photoApp.js";
@@ -30,6 +30,9 @@ import Activity from "./schema/activity.js";
 
 const portno = 3001; // Port number to use
 const app = express();
+
+// Socket.IO instance (will be initialized after server starts)
+let io;
 
 // Enable CORS for all routes
 app.use((req, res, next) => {
@@ -252,7 +255,7 @@ app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
     }
 
     // Fetch all photos as JS objects
-    const photos = await Photo.find({ user_id: id }, '_id user_id comments file_name date_time sharing_list').lean();
+    const photos = await Photo.find({ user_id: id }, '_id user_id comments file_name date_time sharing_list likes').lean();
 
     // Filter out photos the current user is not allowed to see
     const visiblePhotos = photos.filter((p) => {
@@ -269,7 +272,7 @@ app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
       }
 
       // Allow included users to see
-      return isOwner || p.sharing_list.map(id => id.toString()).includes(currentUserId);
+      return isOwner || p.sharing_list.map(userId => userId.toString()).includes(currentUserId);
     });
 
     // Fetch user info for each comment for each photo concurrently
@@ -288,6 +291,19 @@ app.get('/photosOfUser/:id', requireAuth, async (request, response) => {
         );
         photo.comments = updatedComments;
       }
+    });
+
+    // Sort photos by like count (descending), then by timestamp (descending)
+    visiblePhotos.sort((a, b) => {
+      const likesA = a.likes ? a.likes.length : 0;
+      const likesB = b.likes ? b.likes.length : 0;
+
+      if (likesB !== likesA) {
+        return likesB - likesA; // More likes first
+      }
+
+      // Same number of likes, sort by date (most recent first)
+      return new Date(b.date_time) - new Date(a.date_time);
     });
 
     return response.status(200).json(visiblePhotos);
@@ -325,7 +341,7 @@ app.get("/comments/:userId", requireAuth, async (request, response) => {
 
       // Allow included users to see
       else if (Array.isArray(p.sharing_list)){
-        visible = isOwner || p.sharing_list.map(id => id.toString()).includes(currentUserId);
+        visible = isOwner || p.sharing_list.map(uid => uid.toString()).includes(currentUserId);
       }
 
       if (!visible) return; // skip photos not visible
@@ -471,8 +487,13 @@ app.post("/user", async (request, response) => {
       occupation: occupation || ""
     });
 
-    // Log activity
-    await logActivity(io, { user: request.session.user, type: "USER_REGISTER"});
+    // Log activity (use the newly created user's info)
+    const userInfo = {
+      _id: newUser._id,
+      first_name: newUser.first_name,
+      last_name: newUser.last_name
+    };
+    await logActivity(io, { user: userInfo, type: "USER_REGISTER"});
 
     return response.status(200).json({
       login_name: newUser.login_name,
@@ -592,6 +613,212 @@ app.post("/photos/new", requireAuth, upload.single('photo'), async (request, res
   }
 });
 
+/**
+ * POST /photo/:photoId/like - Like a photo
+ */
+app.post('/photo/:photoId/like', requireAuth, async (request, response) => {
+  const { photoId } = request.params;
+  const currentUserId = request.session.user._id;
+
+  if (!mongoose.Types.ObjectId.isValid(photoId)) {
+    return response.status(400).send('Invalid photo ID');
+  }
+
+  try {
+    const photo = await Photo.findById(photoId);
+    if (!photo) {
+      return response.status(404).send('Photo not found');
+    }
+
+    // Check if user already liked this photo
+    if (photo.likes.some(id => id.equals(currentUserId))) {
+      return response.status(400).send('Already liked this photo');
+    }
+
+    // Add like
+    photo.likes.push(currentUserId);
+    await photo.save();
+
+    return response.status(200).json({ likes: photo.likes.length });
+  } catch (err) {
+    console.error("Error liking photo:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
+/**
+ * DELETE /photo/:photoId/like - Unlike a photo
+ */
+app.delete('/photo/:photoId/like', requireAuth, async (request, response) => {
+  const { photoId } = request.params;
+  const currentUserId = request.session.user._id;
+
+  if (!mongoose.Types.ObjectId.isValid(photoId)) {
+    return response.status(400).send('Invalid photo ID');
+  }
+
+  try {
+    const photo = await Photo.findById(photoId);
+    if (!photo) {
+      return response.status(404).send('Photo not found');
+    }
+
+    // Check if user has liked this photo
+    const likeIndex = photo.likes.findIndex(id => id.equals(currentUserId));
+    if (likeIndex === -1) {
+      return response.status(400).send('Have not liked this photo');
+    }
+
+    // Remove like
+    photo.likes.splice(likeIndex, 1);
+    await photo.save();
+
+    return response.status(200).json({ likes: photo.likes.length });
+  } catch (err) {
+    console.error("Error unliking photo:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
+/**
+ * DELETE /photo/:photoId - Delete a photo (owner only)
+ */
+app.delete('/photo/:photoId', requireAuth, async (request, response) => {
+  const { photoId } = request.params;
+  const currentUserId = request.session.user._id.toString();
+
+  if (!mongoose.Types.ObjectId.isValid(photoId)) {
+    return response.status(400).send('Invalid photo ID');
+  }
+
+  try {
+    const photo = await Photo.findById(photoId);
+    if (!photo) {
+      return response.status(404).send('Photo not found');
+    }
+
+    // Check ownership
+    if (photo.user_id.toString() !== currentUserId) {
+      return response.status(403).send('Not authorized to delete this photo');
+    }
+
+    // Delete the physical file
+    const filePath = join(__dirname, 'images', photo.file_name);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    // Delete photo from database
+    await Photo.findByIdAndDelete(photoId);
+
+    // Delete associated activities
+    await Activity.deleteMany({ photo_id: photoId });
+
+    return response.status(200).send('Photo deleted');
+  } catch (err) {
+    console.error("Error deleting photo:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
+/**
+ * DELETE /comment/:photoId/:commentId - Delete a comment (owner only)
+ */
+app.delete('/comment/:photoId/:commentId', requireAuth, async (request, response) => {
+  const { photoId, commentId } = request.params;
+  const currentUserId = request.session.user._id.toString();
+
+  if (!mongoose.Types.ObjectId.isValid(photoId) || !mongoose.Types.ObjectId.isValid(commentId)) {
+    return response.status(400).send('Invalid ID');
+  }
+
+  try {
+    const photo = await Photo.findById(photoId);
+    if (!photo) {
+      return response.status(404).send('Photo not found');
+    }
+
+    // Find the comment
+    const comment = photo.comments.id(commentId);
+    if (!comment) {
+      return response.status(404).send('Comment not found');
+    }
+
+    // Check ownership
+    if (comment.user_id.toString() !== currentUserId) {
+      return response.status(403).send('Not authorized to delete this comment');
+    }
+
+    // Remove comment using pull (proper way for subdocuments)
+    photo.comments.pull(commentId);
+    await photo.save();
+
+    return response.status(200).send('Comment deleted');
+  } catch (err) {
+    console.error("Error deleting comment:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
+/**
+ * DELETE /user - Delete user account (cascade delete all associated data)
+ */
+app.delete('/user', requireAuth, async (request, response) => {
+  const currentUserId = request.session.user._id;
+
+  try {
+    // Get all photos by this user
+    const userPhotos = await Photo.find({ user_id: currentUserId });
+
+    // Delete physical photo files
+    userPhotos.forEach(photo => {
+      const filePath = join(__dirname, 'images', photo.file_name);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    });
+
+    // Delete all photos by this user
+    await Photo.deleteMany({ user_id: currentUserId });
+
+    // Delete all comments by this user (from other users' photos)
+    await Photo.updateMany(
+      { 'comments.user_id': currentUserId },
+      { $pull: { comments: { user_id: currentUserId } } }
+    );
+
+    // Remove user from all sharing lists
+    await Photo.updateMany(
+      { sharing_list: currentUserId },
+      { $pull: { sharing_list: currentUserId } }
+    );
+
+    // Remove user from all photo likes
+    await Photo.updateMany(
+      { likes: currentUserId },
+      { $pull: { likes: currentUserId } }
+    );
+
+    // Delete all activities by this user
+    await Activity.deleteMany({ user_id: currentUserId });
+
+    // Delete the user account
+    await User.findByIdAndDelete(currentUserId);
+
+    // Destroy session
+    return request.session.destroy((err) => {
+      if (err) {
+        console.error("Error destroying session:", err);
+        return response.status(500).send("Error logging out");
+      }
+      return response.status(200).send('Account deleted');
+    });
+  } catch (err) {
+    console.error("Error deleting user account:", err);
+    return response.status(500).send("Server error");
+  }
+});
+
 const server = app.listen(portno, function () {
   const port = server.address().port;
   console.log(
@@ -602,8 +829,7 @@ const server = app.listen(portno, function () {
   );
 });
 
-const io = new Server(server, {
+// Initialize Socket.IO
+io = new Server(server, {
   cors: { origin: "http://localhost:3000", credentials: true }
 });
-
-export default io;

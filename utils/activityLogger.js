@@ -1,6 +1,6 @@
 import Activity from "../schema/activity.js";
 
-export async function logActivity(io, { user, type, photo }) {
+async function logActivity(io, { user, type, photo }) {
   const activity = await Activity.create({
     type,
     user_id: user._id,
@@ -17,3 +17,5 @@ export async function logActivity(io, { user, type, photo }) {
 
   return activity;
 }
+
+export default logActivity;

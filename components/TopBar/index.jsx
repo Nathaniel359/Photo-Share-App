@@ -16,10 +16,12 @@ import {
   Radio,
   RadioGroup,
   Checkbox,
+  Menu,
+  MenuItem,
 } from "@mui/material";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { fetchUserName, logoutUser, uploadPhoto, fetchUserList } from "../../api";
+import { fetchUserName, logoutUser, uploadPhoto, fetchUserList, deleteUserAccount } from "../../api";
 import useAdvancedStore from "../../store/useAdvancedStore";
 import useAuthStore from "../../store/useAuthStore";
 
@@ -39,6 +41,10 @@ function TopBar() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [sharingList, setSharingList] = useState(null);
+
+  // Account menu state
+  const [accountMenuAnchor, setAccountMenuAnchor] = useState(null);
+  const [deleteAccountDialog, setDeleteAccountDialog] = useState(false);
 
   const { data: userList } = useQuery({
     queryKey: ['users', 'list'],
@@ -62,7 +68,7 @@ function TopBar() {
 
   // Photo upload mutation
   const uploadMutation = useMutation({
-    mutationFn: ({ file, sharingList }) => uploadPhoto(file, sharingList),
+    mutationFn: ({ file, sharingList: uploadSharingList }) => uploadPhoto(file, uploadSharingList),
     onSuccess: () => {
       // Invalidate photos query for the logged-in user
       if (loggedInUser) {
@@ -80,6 +86,15 @@ function TopBar() {
           navigate(`/photos/${loggedInUser._id}`);
         }
       }, 1500);
+    },
+  });
+
+  // Delete account mutation
+  const deleteAccountMutation = useMutation({
+    mutationFn: deleteUserAccount,
+    onSuccess: () => {
+      clearUser();
+      navigate('/login');
     },
   });
 
@@ -164,6 +179,23 @@ function TopBar() {
     });
   };
 
+  const handleOpenAccountMenu = (event) => {
+    setAccountMenuAnchor(event.currentTarget);
+  };
+
+  const handleCloseAccountMenu = () => {
+    setAccountMenuAnchor(null);
+  };
+
+  const handleOpenDeleteAccountDialog = () => {
+    setAccountMenuAnchor(null);
+    setDeleteAccountDialog(true);
+  };
+
+  const handleConfirmDeleteAccount = () => {
+    deleteAccountMutation.mutate();
+  };
+
   return (
     <AppBar position="static">
       <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
@@ -174,9 +206,21 @@ function TopBar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           {loggedInUser ? (
             <>
-              <Typography variant="body1">
+              <Button color="inherit" onClick={handleOpenAccountMenu}>
                 Hi {loggedInUser.first_name}
-              </Typography>
+              </Button>
+              <Menu
+                anchorEl={accountMenuAnchor}
+                open={Boolean(accountMenuAnchor)}
+                onClose={handleCloseAccountMenu}
+              >
+                <MenuItem onClick={() => { handleCloseAccountMenu(); navigate(`/users/${loggedInUser._id}`); }}>
+                  My Profile
+                </MenuItem>
+                <MenuItem onClick={handleOpenDeleteAccountDialog} sx={{ color: 'error.main' }}>
+                  Delete Account
+                </MenuItem>
+              </Menu>
               <Button color="inherit" variant="outlined" onClick={() => navigate('/activities')}>
                 Activities
               </Button>
@@ -262,27 +306,26 @@ function TopBar() {
                   Select users:
                 </Typography>
 
-                {userList?.map((user) => {
-                  const isOwner = user._id === loggedInUser._id;
+                {userList?.map((listUser) => {
+                  const isOwner = listUser._id === loggedInUser._id;
                   return (
                     <FormControlLabel
-                      key={user._id}
-                      control={
+                      key={listUser._id}
+                      control={(
                         <Checkbox
-                          checked={isOwner || sharingList.includes(user._id)}
+                          checked={isOwner || sharingList.includes(listUser._id)}
                           disabled={isOwner}
                           onChange={() => {
                             setSharingList((prev) => {
-                              if (prev.includes(user._id)) {
-                                return prev.filter((id) => id !== user._id);
-                              } else {
-                                return [...prev, user._id];
+                              if (prev.includes(listUser._id)) {
+                                return prev.filter((id) => id !== listUser._id);
                               }
+                              return [...prev, listUser._id];
                             });
                           }}
                         />
-                      }
-                      label={`${user.first_name} ${user.last_name}`}
+                      )}
+                      label={`${listUser.first_name} ${listUser.last_name}`}
                     />
                   );
                 })}
@@ -300,6 +343,41 @@ function TopBar() {
             disabled={!selectedFile || uploadMutation.isPending}
           >
             {uploadMutation.isPending ? 'Uploading...' : 'Upload'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Account Confirmation Dialog */}
+      <Dialog open={deleteAccountDialog} onClose={() => setDeleteAccountDialog(false)}>
+        <DialogTitle>Delete Account?</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Warning: This action cannot be undone!
+          </Alert>
+          <Typography>
+            Are you sure you want to delete your account? This will permanently delete:
+          </Typography>
+          <ul>
+            <li>Your user profile</li>
+            <li>All your photos</li>
+            <li>All your comments</li>
+            <li>All activities associated with your account</li>
+          </ul>
+          <Typography variant="body2" color="error">
+            You will be logged out immediately after deletion.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteAccountDialog(false)} disabled={deleteAccountMutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmDeleteAccount}
+            color="error"
+            variant="contained"
+            disabled={deleteAccountMutation.isPending}
+          >
+            {deleteAccountMutation.isPending ? 'Deleting...' : 'Delete My Account'}
           </Button>
         </DialogActions>
       </Dialog>

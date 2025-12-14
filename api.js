@@ -75,3 +75,30 @@ export const fetchActivities = async () => {
   });
   return res.data;
 };
+
+// Likes
+export const likePhoto = async (photoId) => {
+  const res = await axios.post(`http://localhost:3001/photo/${photoId}/like`);
+  return res.data;
+};
+
+export const unlikePhoto = async (photoId) => {
+  const res = await axios.delete(`http://localhost:3001/photo/${photoId}/like`);
+  return res.data;
+};
+
+// Deletions
+export const deletePhoto = async (photoId) => {
+  const res = await axios.delete(`http://localhost:3001/photo/${photoId}`);
+  return res.data;
+};
+
+export const deleteComment = async (photoId, commentId) => {
+  const res = await axios.delete(`http://localhost:3001/comment/${photoId}/${commentId}`);
+  return res.data;
+};
+
+export const deleteUserAccount = async () => {
+  const res = await axios.delete('http://localhost:3001/user');
+  return res.data;
+};

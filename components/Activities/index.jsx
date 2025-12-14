@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import React, { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import io from "socket.io-client";
 import {
@@ -10,6 +10,24 @@ import {
   CircularProgress
 } from "@mui/material";
 import { fetchActivities } from "../../api";
+
+/* Format activity type */
+function formatActivityText(activity) {
+  switch (activity.type) {
+    case "PHOTO_UPLOAD":
+      return "Uploaded a new photo";
+    case "COMMENT":
+      return "Left a new comment";
+    case "USER_REGISTER":
+      return "Registered an account";
+    case "USER_LOGIN":
+      return "Logged in";
+    case "USER_LOGOUT":
+      return "Logged out";
+    default:
+      return activity.type;
+  }
+}
 
 function Activities() {
   const queryClient = useQueryClient();
@@ -86,24 +104,6 @@ function Activities() {
       ))}
     </Box>
   );
-}
-
-/* Format activity type */
-function formatActivityText(activity) {
-  switch (activity.type) {
-    case "PHOTO_UPLOAD":
-      return "Uploaded a new photo";
-    case "COMMENT":
-      return "Left a new comment";
-    case "USER_REGISTER":
-      return "Registered an account";
-    case "USER_LOGIN":
-      return "Logged in";
-    case "USER_LOGOUT":
-      return "Logged out";
-    default:
-      return activity.type;
-  }
 }
 
 export default Activities;
