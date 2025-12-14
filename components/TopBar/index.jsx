@@ -93,6 +93,7 @@ function TopBar() {
   const deleteAccountMutation = useMutation({
     mutationFn: deleteUserAccount,
     onSuccess: () => {
+      setDeleteAccountDialog(false);
       clearUser();
       navigate('/login');
     },

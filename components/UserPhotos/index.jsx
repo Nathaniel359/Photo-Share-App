@@ -43,16 +43,32 @@ function UserPhotos() {
   // Like mutation
   const likeMutation = useMutation({
     mutationFn: (photoId) => likePhoto(photoId),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['photos', userId]);
+    onSuccess: (data, photoId) => {
+      // Optimistically update the like count without refetching
+      queryClient.setQueryData(['photos', userId], (oldData) => {
+        if (!oldData) return oldData;
+        return oldData.map(photo =>
+          photo._id === photoId
+            ? { ...photo, likes: [...(photo.likes || []), loggedInUser._id] }
+            : photo
+        );
+      });
     },
   });
 
   // Unlike mutation
   const unlikeMutation = useMutation({
     mutationFn: (photoId) => unlikePhoto(photoId),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['photos', userId]);
+    onSuccess: (data, photoId) => {
+      // Optimistically update the like count without refetching
+      queryClient.setQueryData(['photos', userId], (oldData) => {
+        if (!oldData) return oldData;
+        return oldData.map(photo =>
+          photo._id === photoId
+            ? { ...photo, likes: (photo.likes || []).filter(id => id !== loggedInUser._id) }
+            : photo
+        );
+      });
     },
   });
 
